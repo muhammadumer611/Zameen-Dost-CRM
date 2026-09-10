@@ -19,16 +19,7 @@ export default function ClearRentalModal({
   onClose,
 }) {
   const { clearRental } = useBuildings();
-  let addIncome, addExpense;
-  try {
-    const revenue = useRevenue();
-    addIncome = revenue.addIncome;
-    addExpense = revenue.addExpense;
-  } catch (error) {
-    addIncome = (data) => console.log("Income would be added:", data);
-    addExpense = (data) => console.log("Expense would be added:", data);
-    console.warn("RevenueProvider not available. Revenue won't be tracked.");
-  }
+  const { settleSecurity } = useRevenue(); // ✅ Proper hook call
 
   const securityHeld = Number(
     room?.initialPayment?.securityReceived || 0
@@ -97,6 +88,7 @@ export default function ClearRentalModal({
 
       // ✅ Get the room ID properly (supports both _id and id)
       const roomId = room._id || room.id;
+      const buildingNo = room.buildingNo || buildingId;
 
       console.log("🔄 Clearing rental for room:", {
         buildingId,
@@ -108,59 +100,29 @@ export default function ClearRentalModal({
         remarks: remarks.trim(),
       });
 
-      // ✅ 1. Clear rental in building context - AWAIT the result
-      const result = await clearRental(buildingId, roomId, {
+      // ✅ Step 1: Settle security in revenue (return/forfeit)
+      if (returnAmount > 0 || forfeitAmount > 0) {
+        await settleSecurity({
+          buildingId,
+          unitId: roomId,
+          unitNo: room?.unitNo,
+          buildingNo: buildingNo,
+          tenantName: room?.tenant?.name || "Unknown",
+          returnAmount,
+          forfeitAmount,
+          remarks: remarks.trim(),
+          createdAt: now,
+        });
+        console.log("✅ Security settled in revenue");
+      }
+
+      // ✅ Step 2: Clear rental in building (update room status)
+      await clearRental(buildingId, roomId, {
         returnAmount,
         forfeitAmount,
         remarks: remarks.trim(),
         clearedAt: now,
       });
-
-      console.log("✅ Clear rental result:", result);
-
-      // ✅ 2. Add forfeited amount as income in revenue
-      if (forfeitAmount > 0) {
-        const incomeData = {
-          id: `${transactionId}-forfeit`,
-          type: "Security Forfeited",
-          category: "Security Income",
-          description: `Security forfeited from ${room?.tenant?.name || "Unknown"} - Unit ${room?.unitNo}`,
-          amount: forfeitAmount,
-          source: "Security",
-          buildingId: buildingId,
-          unitId: roomId,
-          unitNo: room?.unitNo,
-          tenantName: room?.tenant?.name || "Unknown",
-          remarks: remarks.trim(),
-          status: "Received",
-          receivedAt: now,
-          createdAt: now,
-        };
-        console.log("💰 Adding forfeited income:", incomeData);
-        addIncome(incomeData);
-      }
-
-      // ✅ 3. Add returned amount as expense in revenue
-      if (returnAmount > 0) {
-        const expenseData = {
-          id: `${transactionId}-return`,
-          type: "Security Returned",
-          category: "Security Refund",
-          description: `Security returned to ${room?.tenant?.name || "Unknown"} - Unit ${room?.unitNo}`,
-          amount: returnAmount,
-          source: "Security",
-          buildingId: buildingId,
-          unitId: roomId,
-          unitNo: room?.unitNo,
-          tenantName: room?.tenant?.name || "Unknown",
-          remarks: remarks.trim(),
-          status: "Paid",
-          paidAt: now,
-          createdAt: now,
-        };
-        console.log("💰 Adding returned expense:", expenseData);
-        addExpense(expenseData);
-      }
 
       console.log("✅ Rental Cleared Successfully:", {
         id: transactionId,

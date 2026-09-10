@@ -262,6 +262,7 @@ export default function CustomerDetails({
 
         <SecurityHistory
           customer={customer}
+          filterCurrent={true}
         />
       </div>
     </div>

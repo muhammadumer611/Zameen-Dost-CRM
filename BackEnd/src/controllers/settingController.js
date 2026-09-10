@@ -33,10 +33,15 @@ exports.updateSettings = async (req, res) => {
     } else {
       // Deep merge updates
       Object.keys(updates).forEach(category => {
-        if (settings[category] && typeof settings[category] === 'object') {
+        if (updates[category] && typeof updates[category] === 'object' && !Array.isArray(updates[category])) {
+          if (!settings[category]) settings[category] = {};
           Object.keys(updates[category]).forEach(key => {
             settings[category][key] = updates[category][key];
           });
+          settings.markModified(category);
+        } else {
+          settings[category] = updates[category];
+          settings.markModified(category);
         }
       });
       settings.updatedAt = new Date();

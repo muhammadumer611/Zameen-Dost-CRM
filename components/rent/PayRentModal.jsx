@@ -119,9 +119,11 @@ const getPendingAmount = useMemo(() => {
       const transactionId = `rent-${Date.now()}`;
 
       // ✅ Pay rent with calculated months
+      const roomId = room._id || room.id;
+
       const result = await payRent(
         buildingId,
-        room.id,
+        roomId,
         paymentMonths || 1,
         remarks.trim()
       );
@@ -131,7 +133,7 @@ const getPendingAmount = useMemo(() => {
         ? `Advance payment of ${paymentMonths} months - Rs. ${calculatedAmount.toLocaleString()}`
         : `Rent payment for ${months} month(s)`;
 
-      addIncome({
+      await addIncome({
         id: transactionId,
         type: "Rent",
         category: "Monthly Rent",

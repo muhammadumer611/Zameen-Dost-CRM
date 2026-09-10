@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRevenue } from "@/context/RevenueContext";
 import { useAuth } from "@/context/AuthContext";
 import { useBuildings } from "@/context/BuildingContext";
@@ -20,6 +20,12 @@ import {
   Printer,
   X,
 } from "lucide-react";
+
+function transactionTone(type) {
+  if (type === "Expense" || type === "Security Returned") return "out";
+  if (type === "Income" || type === "Security Forfeited") return "in";
+  return "hold";
+}
 
 // ✅ Reusable Modal for viewing details
 function DetailModal({ isOpen, onClose, title, data, renderItem }) {
@@ -70,24 +76,46 @@ function DetailModal({ isOpen, onClose, title, data, renderItem }) {
 }
 
 export default function RevenuePage() {
-  const { revenueData, toggleSecurities, getTransactions, addIncome, getRevenueStats } = useRevenue();
+  // ✅ Sabse pehle sab hooks call karo
+  const { 
+    revenueData, 
+    toggleSecurities, 
+    getTransactions, 
+    addIncome, 
+    addExpense, 
+    getRevenueStats, 
+    loadRevenue,
+    loading: revenueLoading 
+  } = useRevenue();
   const { user } = useAuth();
   const { buildings } = useBuildings();
 
-  const transactions = getTransactions();
-  const stats = getRevenueStats();
-  
   const [showSecurities, setShowSecurities] = useState(revenueData.includeSecurities || false);
   const [showAddIncome, setShowAddIncome] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [showTransactionsModal, setShowTransactionsModal] = useState(false);
-  
-  // ✅ Modal states
   const [showExpensesModal, setShowExpensesModal] = useState(false);
   const [showSecuritiesModal, setShowSecuritiesModal] = useState(false);
   const [showProfitLossModal, setShowProfitLossModal] = useState(false);
 
-  // ✅ Use stats from getRevenueStats
+  // ✅ Page load par revenue data fetch karo
+  useEffect(() => {
+    loadRevenue();
+  }, []);
+
+  const transactions = getTransactions();
+  const stats = getRevenueStats();
+
+  // ✅ Loading check sab hooks ke baad
+  if (revenueLoading) {
+    return (
+      <div className="flex min-h-[400px] items-center justify-center">
+        <div className="animate-pulse text-muted-foreground">Loading revenue data...</div>
+      </div>
+    );
+  }
+
+  // Baaki calculations
   const totalIncome = stats.baseRevenue || 0;
   const totalExpenses = stats.totalExpenses || 0;
   const totalSecurities = stats.securitiesTotal || 0;
@@ -95,13 +123,8 @@ export default function RevenuePage() {
   const profit = stats.netProfit || 0;
   const profitMargin = totalRevenue > 0 ? (profit / totalRevenue) * 100 : 0;
 
-  // Top 5 recent transactions
   const recentTransactions = transactions.slice(0, 5);
-
-  // ✅ All expenses
   const allExpenses = revenueData.expenses || [];
-
-  // ✅ All securities
   const allSecurities = revenueData.securities || [];
 
   const handleToggleSecurities = () => {
@@ -113,12 +136,11 @@ export default function RevenuePage() {
     await addIncome(data);
   };
 
-  // ✅ Open transactions modal
   const handleViewAllTransactions = () => {
     setShowTransactionsModal(true);
   };
 
-  // ✅ Print function for profit/loss report
+  // ✅ Print function (same as before)
   const handlePrintProfitLoss = () => {
     const printWindow = window.open('', '_blank', 'width=800,height=600');
     if (printWindow) {
@@ -176,6 +198,18 @@ export default function RevenuePage() {
                 </div>`
               ).join('')}
             </div>
+              ${ (revenueData.securities || []).length > 0 ? `
+            <div class="section">
+              <h2>Security Transactions</h2>
+              ${(revenueData.securities || []).map(s =>
+                `<div class="row" style="padding-left:20px;font-size:0.9em;">
+                  <span>${s.eventType || s.status || 'Security'} - ${s.description || s.tenantName || ''}</span>
+                  <span>Rs. ${Number(s.amount || 0).toLocaleString()}</span>
+                </div>`
+              ).join('')}
+              <div class="row"><span>Securities Currently Held</span><span>Rs. ${totalSecurities.toLocaleString()}</span></div>
+            </div>
+              ` : ''}
             <div class="section">
               <div class="row total">
                 <span>Net Profit / Loss</span>
@@ -341,7 +375,6 @@ export default function RevenuePage() {
               <h2 className="text-lg font-semibold">Recent Transactions</h2>
               <p className="text-xs text-muted-foreground">Latest financial activities</p>
             </div>
-            {/* ✅ View All Button - Now Functional */}
             <button
               onClick={handleViewAllTransactions}
               className="text-xs text-indigo-400 hover:text-indigo-300 transition flex items-center gap-1"
@@ -362,15 +395,15 @@ export default function RevenuePage() {
                 >
                   <div className="flex items-center gap-3">
                     <div className={`rounded-lg p-2 ${
-                      tx.type === "Income" 
+                      transactionTone(tx.type) === "in"
                         ? "bg-emerald-500/10 text-emerald-400"
-                        : tx.type === "Expense"
+                        : transactionTone(tx.type) === "out"
                         ? "bg-red-500/10 text-red-400"
                         : "bg-amber-500/10 text-amber-400"
                     }`}>
-                      {tx.type === "Income" ? (
+                      {transactionTone(tx.type) === "in" ? (
                         <ArrowUpRight size={16} />
-                      ) : tx.type === "Expense" ? (
+                      ) : transactionTone(tx.type) === "out" ? (
                         <ArrowDownRight size={16} />
                       ) : (
                         <Wallet size={16} />
@@ -390,8 +423,14 @@ export default function RevenuePage() {
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className={`text-sm font-bold ${tx.type === "Income" ? "text-emerald-400" : tx.type === "Expense" ? "text-red-400" : "text-amber-400"}`}>
-                      {tx.type === "Expense" ? "-" : "+"} Rs. {tx.amount.toLocaleString()}
+                    <p className={`text-sm font-bold ${
+                      transactionTone(tx.type) === "in"
+                        ? "text-emerald-400"
+                        : transactionTone(tx.type) === "out"
+                        ? "text-red-400"
+                        : "text-amber-400"
+                    }`}>
+                      {transactionTone(tx.type) === "out" ? "-" : "+"} Rs. {tx.amount.toLocaleString()}
                     </p>
                     {tx.category && (
                       <p className="text-xs text-muted-foreground">{tx.category}</p>
@@ -404,15 +443,13 @@ export default function RevenuePage() {
         </div>
       </div>
 
-      {/* ✅ Add Income Modal */}
+      {/* Modals */}
       {showAddIncome && (
         <AddIncomeModal
           onClose={() => setShowAddIncome(false)}
           onSave={handleAddIncome}
         />
       )}
-
-      {/* ✅ Transactions Modal - All Transactions */}
       {showTransactionsModal && (
         <TransactionsModal
           isOpen={showTransactionsModal}
@@ -420,8 +457,6 @@ export default function RevenuePage() {
           transactions={transactions}
         />
       )}
-
-      {/* ✅ Expenses Modal */}
       <DetailModal
         isOpen={showExpensesModal}
         onClose={() => setShowExpensesModal(false)}
@@ -444,8 +479,6 @@ export default function RevenuePage() {
           </div>
         )}
       />
-
-      {/* ✅ Securities Modal */}
       <DetailModal
         isOpen={showSecuritiesModal}
         onClose={() => setShowSecuritiesModal(false)}
@@ -458,7 +491,7 @@ export default function RevenuePage() {
                 <p className="font-medium text-foreground">{sec.description || 'Security'}</p>
                 <p className="text-xs text-muted-foreground">Tenant: {sec.tenantName || 'N/A'}</p>
                 <p className="text-xs text-muted-foreground">Unit: {sec.unitNo || 'N/A'} - {sec.buildingNo || 'N/A'}</p>
-                <p className="text-xs text-muted-foreground">Status: {sec.status || 'Held'}</p>
+                <p className="text-xs text-muted-foreground">Type: {sec.eventType || 'Received'} • Status: {sec.status || 'Held'}</p>
                 {sec.returnDate && (
                   <p className="text-xs text-muted-foreground">Returned: {new Date(sec.returnDate).toLocaleDateString()}</p>
                 )}
@@ -468,7 +501,9 @@ export default function RevenuePage() {
                 <p className="text-xs text-muted-foreground">{new Date(sec.createdAt).toLocaleString()}</p>
               </div>
               <div className="text-right">
-                <p className="font-bold text-amber-400">+ Rs. {sec.amount.toLocaleString()}</p>
+                <p className={`font-bold ${sec.status === 'Returned' ? 'text-red-400' : sec.status === 'Forfeited' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {sec.status === 'Returned' ? '-' : '+'} Rs. {sec.amount.toLocaleString()}
+                </p>
                 {sec.returnedAmount && (
                   <p className="text-xs text-muted-foreground">Returned: Rs. {sec.returnedAmount.toLocaleString()}</p>
                 )}
@@ -477,8 +512,6 @@ export default function RevenuePage() {
           </div>
         )}
       />
-
-      {/* ✅ Profit/Loss Report Modal */}
       <DetailModal
         isOpen={showProfitLossModal}
         onClose={() => setShowProfitLossModal(false)}
@@ -486,6 +519,7 @@ export default function RevenuePage() {
         data={[{ profit, profitMargin, totalRevenue, totalIncome, totalExpenses, totalSecurities }]}
         renderItem={(report, index) => (
           <div key={index} className="space-y-4">
+            {/* Report content same as before */}
             <div className="grid grid-cols-3 gap-3">
               <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 text-center">
                 <p className="text-xs text-muted-foreground">Total Revenue</p>

@@ -79,13 +79,20 @@ export default function UnitForm({
   const [editingDocument, setEditingDocument] = useState(null);
 
   // Basic Change
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setForm((prev) => ({
+ const handleChange = (e) => {
+  const { name, value } = e.target;
+  if (name === "status" && value === "Rented" && form.status !== "Rented") {
+    // ✅ Jab available se rented ho, payment fields khaali karo
+    setForm(prev => ({
       ...prev,
-      [name]: value,
+      status: value,
+      cashReceived: "",
+      rentStartDate: "",
     }));
-  };
+  } else {
+    setForm(prev => ({ ...prev, [name]: value }));
+  }
+};
 
   const handlePurposeChange = (e) => {
     const value = e.target.value;
@@ -221,8 +228,7 @@ export default function UnitForm({
       ? `${form.unitNo.trim()}-D${form.deskNo.trim().padStart(2, "0")}`
       : form.unitNo.trim();
 
-  // ✅ SUBMIT - Complete Working Version
- // ✅ SUBMIT - Complete Working Version with Image Preservation
+  // ✅ SUBMIT - Complete Working Version with Image Preservation
 const handleSubmit = async (e) => {
   e.preventDefault();
 
@@ -322,13 +328,54 @@ const handleSubmit = async (e) => {
         }
       }
     }
-    // ✅ PRESERVE HISTORIES
-    if (initialData.rentHistory) {
+    
+    // ✅ Detect fresh rental or new tenant
+    const isNewRental =
+      (initialData.status !== "Rented" && form.status === "Rented") ||
+      (initialData.tenant?.cnic && form.tenant?.cnic && initialData.tenant.cnic !== form.tenant.cnic);
+
+    // ✅ FIX: Rent history append karo (fresh rental par monthExists check nahi hoga)
+    if (form.status === "Rented" && paymentCalculation.rentPaid > 0) {
+      const newRentEntry = {
+        month: form.rentStartDate?.slice(0, 7) || new Date().toISOString().slice(0, 7),
+        amount: paymentCalculation.rentPaid,
+        status: "Paid",
+        paidAt: paymentDateTime,
+      };
+
+      if (isNewRental) {
+        // Fresh rental for new tenant: always record initial rent
+        unitData.rentHistory = [...(initialData.rentHistory || []), newRentEntry];
+      } else {
+        // Ongoing edit for same tenant: check if month exists
+        const monthExists = (initialData.rentHistory || []).some(
+          (h) => h.month === newRentEntry.month
+        );
+        if (!monthExists) {
+          unitData.rentHistory = [...(initialData.rentHistory || []), newRentEntry];
+        } else {
+          unitData.rentHistory = initialData.rentHistory || [];
+        }
+      }
+    } else if (initialData.rentHistory) {
       unitData.rentHistory = initialData.rentHistory;
     }
-    if (initialData.securityHistory) {
+
+    // ✅ FIX: Security history append karo (fresh rental par 'Initial security received')
+    if (form.status === "Rented" && paymentCalculation.securityReceived > 0) {
+      const newSecurityEntry = {
+        type: "received",
+        amount: paymentCalculation.securityReceived,
+        date: paymentDateTime,
+        note: isNewRental ? "Initial security received" : "Additional security received",
+      };
+
+      unitData.securityHistory = [...(initialData.securityHistory || []), newSecurityEntry];
+    } else if (initialData.securityHistory) {
       unitData.securityHistory = initialData.securityHistory;
     }
+    
+    // ✅ PRESERVE other histories
     if (initialData.clearanceHistory) {
       unitData.clearanceHistory = initialData.clearanceHistory;
     }

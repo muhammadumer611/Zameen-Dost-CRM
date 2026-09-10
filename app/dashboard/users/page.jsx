@@ -101,11 +101,11 @@ export default function UsersPage() {
               </thead>
               <tbody>
                 {filteredUsers.map((user) => {
-                  const isCurrentUser = user.id === currentUser?.id;
+                  const isCurrentUser = user._id === currentUser?._id;
 
                   return (
                     <tr
-                      key={user.id}
+                      key={user._id}
                       className="border-b border-border/70 transition hover:bg-muted"
                     >
                       <td className="px-6 py-4">
@@ -125,11 +125,10 @@ export default function UsersPage() {
                       </td>
                       <td className="px-6 py-4">
                         <span
-                          className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium ${
-                            user.status === "active"
+                          className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium ${user.status === "active"
                               ? "bg-emerald-500/10 text-emerald-400"
                               : "bg-red-500/10 text-red-400"
-                          }`}
+                            }`}
                         >
                           {user.status === "active" ? (
                             <UserCheck size={12} />
@@ -140,7 +139,7 @@ export default function UsersPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-sm text-muted-foreground">
-                        {user.employeeId || "—"}
+                        {user.employeeName || user.employeeId || "—"}
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-1">
@@ -159,7 +158,7 @@ export default function UsersPage() {
                                 <Edit size={17} />
                               </button>
                               <button
-                                onClick={() => handleDelete(user.id)}
+                                onClick={() => handleDelete(user._id)}
                                 className="rounded-lg p-2 text-muted-foreground transition hover:bg-red-500/10 hover:text-red-400"
                                 title="Delete"
                               >

@@ -1,5 +1,112 @@
 const Building = require('../models/Building');
+const { recordIncome, recordSecurityReceived } = require('../utils/revenueLedger');
 
+async function syncRoomPaymentsToRevenue(building, room, previousRoom = null) {
+  try {
+    if (!room || room.status !== 'Rented') return;
+
+    // ✅ Detect fresh rental or tenant change (Refinement 2)
+    const isFreshRental =
+      !previousRoom ||
+      (previousRoom.status !== 'Rented' && room.status === 'Rented') ||
+      (previousRoom.tenant?.cnic && room.tenant?.cnic && previousRoom.tenant.cnic !== room.tenant.cnic);
+
+    if (isFreshRental) {
+      const securityAmount = Number(room.initialPayment?.securityReceived || 0);
+      console.log(`🔒 Fresh Rental Security: ${securityAmount}`);
+
+      if (securityAmount > 0) {
+        await recordSecurityReceived({
+          tenantName: room.tenant?.name || 'Tenant',
+          unitNo: room.unitNo,
+          buildingNo: building.buildingNo,
+          buildingId: building._id,
+          unitId: room._id || room.id,
+          amount: securityAmount,
+          description: `Security received from ${room.tenant?.name || 'Tenant'} - Unit ${room.unitNo}`,
+          remarks: 'Initial security received',
+          createdAt: room.initialPayment?.paymentDateTime || new Date().toISOString(),
+        });
+      }
+
+      const rentAmount = Number(room.initialPayment?.rentPaid || 0);
+      console.log(`💰 Fresh Rental Rent: ${rentAmount}`);
+
+      if (rentAmount > 0) {
+        await recordIncome({
+          type: 'Rent',
+          category: 'Monthly Rent',
+          description: `Rent received from ${room.tenant?.name || 'Tenant'} - Unit ${room.unitNo}`,
+          amount: rentAmount,
+          source: 'Rent',
+          buildingId: building._id,
+          unitId: room._id || room.id,
+          unitNo: room.unitNo,
+          tenantName: room.tenant?.name || 'Tenant',
+          status: 'Received',
+          receivedAt: room.initialPayment?.paymentDateTime || new Date().toISOString(),
+        });
+      }
+      return;
+    }
+
+    // ✅ Security Delta (initialPayment se) for existing active rental update
+    const prevSecurity = Number(previousRoom?.initialPayment?.securityReceived || 0);
+    const nextSecurity = Number(room.initialPayment?.securityReceived || 0);
+    const securityDelta = nextSecurity - prevSecurity;
+    console.log(`🔒 Security Delta: ${securityDelta} (prev: ${prevSecurity}, next: ${nextSecurity})`);
+
+    if (securityDelta > 0) {
+      await recordSecurityReceived({
+        tenantName: room.tenant?.name || 'Tenant',
+        unitNo: room.unitNo,
+        buildingNo: building.buildingNo,
+        buildingId: building._id,
+        unitId: room._id || room.id,
+        amount: securityDelta,
+        description: `Security received from ${room.tenant?.name || 'Tenant'} - Unit ${room.unitNo}`,
+        remarks: 'Additional security received',
+        createdAt: room.initialPayment?.paymentDateTime || new Date().toISOString(),
+      });
+    }
+
+    // ✅ Rent Delta (pehle rentHistory, phir initialPayment.rentPaid fallback)
+    const prevRentFromHistory = (previousRoom?.rentHistory || [])
+      .filter(item => item.status === 'Paid')
+      .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+    const nextRentFromHistory = (room.rentHistory || [])
+      .filter(item => item.status === 'Paid')
+      .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+    let rentDelta = nextRentFromHistory - prevRentFromHistory;
+
+    if (rentDelta <= 0) {
+      const prevRentPaid = Number(previousRoom?.initialPayment?.rentPaid || 0);
+      const nextRentPaid = Number(room.initialPayment?.rentPaid || 0);
+      rentDelta = nextRentPaid - prevRentPaid;
+      console.log(`💰 Rent Delta (fallback): ${rentDelta} (prev: ${prevRentPaid}, next: ${nextRentPaid})`);
+    } else {
+      console.log(`💰 Rent Delta (history): ${rentDelta}`);
+    }
+
+    if (rentDelta > 0) {
+      await recordIncome({
+        type: 'Rent',
+        category: 'Monthly Rent',
+        description: `Rent received from ${room.tenant?.name || 'Tenant'} - Unit ${room.unitNo}`,
+        amount: rentDelta,
+        source: 'Rent',
+        buildingId: building._id,
+        unitId: room._id || room.id,
+        unitNo: room.unitNo,
+        tenantName: room.tenant?.name || 'Tenant',
+        status: 'Received',
+        receivedAt: room.initialPayment?.paymentDateTime || new Date().toISOString(),
+      });
+    }
+  } catch (error) {
+    console.error('Failed to sync room payments to revenue:', error);
+  }
+}
 // ✅ Get all buildings
 exports.getBuildings = async (req, res) => {
   try {
@@ -244,6 +351,9 @@ exports.addRoom = async (req, res) => {
     building.totalUnits = building.rooms.length;
     await building.save();
 
+    const savedRoom = building.rooms[building.rooms.length - 1];
+    await syncRoomPaymentsToRevenue(building, savedRoom, null);
+
     res.status(201).json({
       success: true,
       message: 'Room added successfully.',
@@ -288,6 +398,8 @@ exports.updateRoom = async (req, res) => {
         message: 'Room not found.',
       });
     }
+
+    const previousRoom = room.toObject();
 
     // ✅ Parse roomData
     let updates = {};
@@ -366,6 +478,10 @@ exports.updateRoom = async (req, res) => {
     });
 
     await building.save();
+
+    if (!updates.skipRevenueSync) {
+      await syncRoomPaymentsToRevenue(building, building.rooms.id(roomId), previousRoom);
+    }
 
     res.status(200).json({
       success: true,

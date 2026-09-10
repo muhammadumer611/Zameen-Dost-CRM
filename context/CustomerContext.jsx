@@ -15,12 +15,17 @@ export function CustomerProvider({ children }) {
     loadCustomers();
   }, []);
 
-  // ✅ Load all customers
+  // ✅ Load all active customers
   const loadCustomers = async (params = {}) => {
     try {
       setLoading(true);
-      const response = await customerAPI.getAll(params);
-      setCustomers(response.data.data || []);
+      const queryParams = { status: "Active", ...params };
+      const response = await customerAPI.getAll(queryParams);
+      const list = response.data.data || [];
+      const activeOnly = params.status && params.status !== "Active"
+        ? list
+        : list.filter((c) => !c.currentRental || c.currentRental.status === "Active");
+      setCustomers(activeOnly);
       setError(null);
     } catch (error) {
       console.error("Failed to load customers:", error);

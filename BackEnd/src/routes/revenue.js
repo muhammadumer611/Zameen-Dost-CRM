@@ -7,6 +7,7 @@ const {
   addIncome,
   addExpense,
   addSecurity,
+  settleSecurity,
   getTransactions,
 } = require('../controllers/revenueController');
 
@@ -22,5 +23,6 @@ router.put('/toggle-securities', toggleSecurities);
 router.post('/income', addIncome);
 router.post('/expense', addExpense);
 router.post('/security', addSecurity);
+router.post('/security/settle', settleSecurity);
 
 module.exports = router;

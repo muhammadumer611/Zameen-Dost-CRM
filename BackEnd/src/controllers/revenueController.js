@@ -1,49 +1,23 @@
-const Revenue = require('../models/Revenue');
+const {
+  getOrCreateRevenue,
+  recalculate,
+  recordIncome,
+  recordExpense,
+  recordSecurityReceived,
+  settleSecurity,
+  buildTransactions,
+} = require('../utils/revenueLedger');
 
-// ✅ Get revenue data
 exports.getRevenue = async (req, res) => {
   try {
-    // Get first revenue document or create if not exists
-    let revenue = await Revenue.findOne();
-    
-    if (!revenue) {
-      revenue = await Revenue.create({
-        income: [],
-        expenses: [],
-        securities: [],
-        includeSecurities: false,
-        totalRevenue: 0,
-        totalExpenses: 0,
-        netProfit: 0,
-      });
-    }
-
-    // Calculate totals
-    const totalIncome = revenue.income.reduce((sum, i) => sum + (i.amount || 0), 0);
-    const totalExpenses = revenue.expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
-    const totalSecurities = revenue.securities
-      .filter(s => s.status === 'Held')
-      .reduce((sum, s) => sum + (s.amount || 0), 0);
-    
-    const totalRevenue = revenue.includeSecurities ? totalIncome + totalSecurities : totalIncome;
-    
-    // Update cached values
-    revenue.totalRevenue = totalRevenue;
-    revenue.totalExpenses = totalExpenses;
-    revenue.netProfit = totalRevenue - totalExpenses;
+    const revenue = await getOrCreateRevenue();
+    const stats = recalculate(revenue);
     await revenue.save();
 
     res.status(200).json({
       success: true,
       data: revenue,
-      stats: {
-        totalIncome,
-        totalExpenses,
-        totalSecurities,
-        totalRevenue,
-        netProfit: totalRevenue - totalExpenses,
-        includeSecurities: revenue.includeSecurities,
-      },
+      stats,
     });
   } catch (error) {
     res.status(500).json({
@@ -53,51 +27,18 @@ exports.getRevenue = async (req, res) => {
   }
 };
 
-// ✅ Toggle securities inclusion
 exports.toggleSecurities = async (req, res) => {
   try {
-    let revenue = await Revenue.findOne();
-    
-    if (!revenue) {
-      revenue = await Revenue.create({
-        income: [],
-        expenses: [],
-        securities: [],
-        includeSecurities: false,
-        totalRevenue: 0,
-        totalExpenses: 0,
-        netProfit: 0,
-      });
-    }
-
+    const revenue = await getOrCreateRevenue();
     revenue.includeSecurities = !revenue.includeSecurities;
-    
-    // Recalculate
-    const totalIncome = revenue.income.reduce((sum, i) => sum + (i.amount || 0), 0);
-    const totalExpenses = revenue.expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
-    const totalSecurities = revenue.securities
-      .filter(s => s.status === 'Held')
-      .reduce((sum, s) => sum + (s.amount || 0), 0);
-    
-    const totalRevenue = revenue.includeSecurities ? totalIncome + totalSecurities : totalIncome;
-    
-    revenue.totalRevenue = totalRevenue;
-    revenue.totalExpenses = totalExpenses;
-    revenue.netProfit = totalRevenue - totalExpenses;
+    const stats = recalculate(revenue);
     await revenue.save();
 
     res.status(200).json({
       success: true,
       message: `Securities ${revenue.includeSecurities ? 'included' : 'excluded'} successfully.`,
       data: revenue,
-      stats: {
-        totalIncome,
-        totalExpenses,
-        totalSecurities,
-        totalRevenue,
-        netProfit: totalRevenue - totalExpenses,
-        includeSecurities: revenue.includeSecurities,
-      },
+      stats,
     });
   } catch (error) {
     res.status(500).json({
@@ -107,45 +48,17 @@ exports.toggleSecurities = async (req, res) => {
   }
 };
 
-// ✅ Add income
 exports.addIncome = async (req, res) => {
   try {
-    let revenue = await Revenue.findOne();
-    
-    if (!revenue) {
-      revenue = await Revenue.create({
-        income: [],
-        expenses: [],
-        securities: [],
-        includeSecurities: false,
-        totalRevenue: 0,
-        totalExpenses: 0,
-        netProfit: 0,
-      });
+    const incomeData = { ...req.body };
+
+    if (incomeData.type === 'Rent' && incomeData.rentPayment) {
+      incomeData.unitNo = incomeData.rentPayment.unitNo || incomeData.unitNo;
+      incomeData.tenantName = incomeData.rentPayment.tenantName || incomeData.tenantName;
+      incomeData.amount = incomeData.rentPayment.amount || incomeData.amount;
     }
 
-    const incomeData = {
-      ...req.body,
-      id: req.body.id || `income-${Date.now()}`,
-      createdAt: req.body.createdAt || new Date().toISOString(),
-      receivedAt: req.body.receivedAt || new Date().toISOString(),
-    };
-
-    revenue.income.push(incomeData);
-    
-    // Recalculate
-    const totalIncome = revenue.income.reduce((sum, i) => sum + (i.amount || 0), 0);
-    const totalExpenses = revenue.expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
-    const totalSecurities = revenue.securities
-      .filter(s => s.status === 'Held')
-      .reduce((sum, s) => sum + (s.amount || 0), 0);
-    
-    const totalRevenue = revenue.includeSecurities ? totalIncome + totalSecurities : totalIncome;
-    
-    revenue.totalRevenue = totalRevenue;
-    revenue.totalExpenses = totalExpenses;
-    revenue.netProfit = totalRevenue - totalExpenses;
-    await revenue.save();
+    const revenue = await recordIncome(incomeData);
 
     res.status(201).json({
       success: true,
@@ -153,6 +66,7 @@ exports.addIncome = async (req, res) => {
       data: revenue,
     });
   } catch (error) {
+    console.error('Add income error:', error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -160,45 +74,9 @@ exports.addIncome = async (req, res) => {
   }
 };
 
-// ✅ Add expense
 exports.addExpense = async (req, res) => {
   try {
-    let revenue = await Revenue.findOne();
-    
-    if (!revenue) {
-      revenue = await Revenue.create({
-        income: [],
-        expenses: [],
-        securities: [],
-        includeSecurities: false,
-        totalRevenue: 0,
-        totalExpenses: 0,
-        netProfit: 0,
-      });
-    }
-
-    const expenseData = {
-      ...req.body,
-      id: req.body.id || `expense-${Date.now()}`,
-      createdAt: req.body.createdAt || new Date().toISOString(),
-      paidAt: req.body.paidAt || new Date().toISOString(),
-    };
-
-    revenue.expenses.push(expenseData);
-    
-    // Recalculate
-    const totalIncome = revenue.income.reduce((sum, i) => sum + (i.amount || 0), 0);
-    const totalExpenses = revenue.expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
-    const totalSecurities = revenue.securities
-      .filter(s => s.status === 'Held')
-      .reduce((sum, s) => sum + (s.amount || 0), 0);
-    
-    const totalRevenue = revenue.includeSecurities ? totalIncome + totalSecurities : totalIncome;
-    
-    revenue.totalRevenue = totalRevenue;
-    revenue.totalExpenses = totalExpenses;
-    revenue.netProfit = totalRevenue - totalExpenses;
-    await revenue.save();
+    const revenue = await recordExpense(req.body);
 
     res.status(201).json({
       success: true,
@@ -213,45 +91,9 @@ exports.addExpense = async (req, res) => {
   }
 };
 
-// ✅ Add security
 exports.addSecurity = async (req, res) => {
   try {
-    let revenue = await Revenue.findOne();
-    
-    if (!revenue) {
-      revenue = await Revenue.create({
-        income: [],
-        expenses: [],
-        securities: [],
-        includeSecurities: false,
-        totalRevenue: 0,
-        totalExpenses: 0,
-        netProfit: 0,
-      });
-    }
-
-    const securityData = {
-      ...req.body,
-      id: req.body.id || `security-${Date.now()}`,
-      status: req.body.status || 'Held',
-      createdAt: req.body.createdAt || new Date().toISOString(),
-    };
-
-    revenue.securities.push(securityData);
-    
-    // Recalculate
-    const totalIncome = revenue.income.reduce((sum, i) => sum + (i.amount || 0), 0);
-    const totalExpenses = revenue.expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
-    const totalSecurities = revenue.securities
-      .filter(s => s.status === 'Held')
-      .reduce((sum, s) => sum + (s.amount || 0), 0);
-    
-    const totalRevenue = revenue.includeSecurities ? totalIncome + totalSecurities : totalIncome;
-    
-    revenue.totalRevenue = totalRevenue;
-    revenue.totalExpenses = totalExpenses;
-    revenue.netProfit = totalRevenue - totalExpenses;
-    await revenue.save();
+    const revenue = await recordSecurityReceived(req.body);
 
     res.status(201).json({
       success: true,
@@ -259,6 +101,7 @@ exports.addSecurity = async (req, res) => {
       data: revenue,
     });
   } catch (error) {
+    console.error('Add security error:', error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -266,58 +109,28 @@ exports.addSecurity = async (req, res) => {
   }
 };
 
-// ✅ Get transactions (combined)
+exports.settleSecurity = async (req, res) => {
+  try {
+    const revenue = await settleSecurity(req.body);
+
+    res.status(201).json({
+      success: true,
+      message: 'Security settlement recorded successfully.',
+      data: revenue,
+    });
+  } catch (error) {
+    console.error('Settle security error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 exports.getTransactions = async (req, res) => {
   try {
-    let revenue = await Revenue.findOne();
-    
-    if (!revenue) {
-      revenue = await Revenue.create({
-        income: [],
-        expenses: [],
-        securities: [],
-        includeSecurities: false,
-        totalRevenue: 0,
-        totalExpenses: 0,
-        netProfit: 0,
-      });
-    }
-
-    const transactions = [];
-
-    // Add income
-    revenue.income.forEach(inc => {
-      transactions.push({
-        ...inc._doc,
-        type: 'Income',
-        date: inc.receivedAt || inc.createdAt,
-      });
-    });
-
-    // Add expenses
-    revenue.expenses.forEach(exp => {
-      transactions.push({
-        ...exp._doc,
-        type: 'Expense',
-        date: exp.paidAt || exp.createdAt,
-      });
-    });
-
-    // Add securities (if included)
-    if (revenue.includeSecurities) {
-      revenue.securities
-        .filter(s => s.status === 'Held')
-        .forEach(sec => {
-          transactions.push({
-            ...sec._doc,
-            type: 'Security',
-            date: sec.createdAt,
-          });
-        });
-    }
-
-    // Sort by date (newest first)
-    transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
+    const revenue = await getOrCreateRevenue();
+    const transactions = buildTransactions(revenue);
 
     res.status(200).json({
       success: true,
@@ -325,6 +138,7 @@ exports.getTransactions = async (req, res) => {
       data: transactions,
     });
   } catch (error) {
+    console.error('Get transactions error:', error);
     res.status(500).json({
       success: false,
       message: error.message,

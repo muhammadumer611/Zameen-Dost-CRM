@@ -364,7 +364,7 @@ const payRent = async (buildingId, unitId, months, remarks = "") => {
           },
         ],
         securityHistory: [
-          ...(room.securityHistory || []),
+          ...(room.securityHistory || []).map((item) => ({ ...item, archived: true })),
           ...(returned > 0
             ? [
                 {
@@ -372,6 +372,7 @@ const payRent = async (buildingId, unitId, months, remarks = "") => {
                   amount: returned,
                   date: clearedAt,
                   note: `Security returned to customer. ${remarks || "Rental ended"}`,
+                  archived: true,
                 },
               ]
             : []),
@@ -382,6 +383,7 @@ const payRent = async (buildingId, unitId, months, remarks = "") => {
                   amount: forfeited,
                   date: clearedAt,
                   note: `Security forfeited. ${remarks || "Rental ended"}`,
+                  archived: true,
                 },
               ]
             : []),

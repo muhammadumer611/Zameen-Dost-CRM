@@ -3,6 +3,7 @@ const Employee = require('../models/Employee');
 const Lead = require('../models/Lead');
 const Revenue = require('../models/Revenue');
 const Customer = require('../models/Customer');
+const { isSecurityDepositIncome, isSecurityRefundExpense } = require('../utils/revenueLedger');
 
 // ============================================================
 // PROFIT & LOSS REPORT
@@ -10,7 +11,7 @@ const Customer = require('../models/Customer');
 exports.getProfitLossReport = async (req, res) => {
   try {
     const { period = 'monthly', startDate, endDate } = req.query;
-    
+
     let start = new Date();
     let end = new Date();
 
@@ -37,7 +38,7 @@ exports.getProfitLossReport = async (req, res) => {
     }
 
     const revenue = await Revenue.findOne();
-    
+
     let income = [];
     let expenses = [];
     let securities = [];
@@ -49,14 +50,14 @@ exports.getProfitLossReport = async (req, res) => {
       // ✅ Filter income by date range
       income = (revenue.income || []).filter(inc => {
         const incDate = new Date(inc.createdAt);
-        return incDate >= start && incDate <= end;
+        return incDate >= start && incDate <= end && !isSecurityDepositIncome(inc);
       });
       totalIncome = income.reduce((sum, i) => sum + (i.amount || 0), 0);
 
       // ✅ Filter expenses by date range
       expenses = (revenue.expenses || []).filter(exp => {
         const expDate = new Date(exp.createdAt);
-        return expDate >= start && expDate <= end;
+        return expDate >= start && expDate <= end && !isSecurityRefundExpense(exp);
       });
       totalExpenses = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
 
@@ -107,7 +108,7 @@ exports.getProfitLossReport = async (req, res) => {
 exports.getGeneralReport = async (req, res) => {
   try {
     const { period = 'monthly', startDate, endDate } = req.query;
-    
+
     let start = new Date();
     let end = new Date();
 
@@ -136,7 +137,7 @@ exports.getGeneralReport = async (req, res) => {
     const buildings = await Building.find();
     const totalBuildings = buildings.length;
     const activeBuildings = buildings.filter(b => b.status === 'Active').length;
-    
+
     let totalRooms = 0;
     let rentedRooms = 0;
     let availableRooms = 0;
@@ -147,7 +148,7 @@ exports.getGeneralReport = async (req, res) => {
       totalRooms += (b.rooms || []).length;
       rentedRooms += (b.rooms || []).filter(r => r.status === 'Rented').length;
       availableRooms += (b.rooms || []).filter(r => r.status === 'Available').length;
-      
+
       // Check if added in period
       if (b.createdAt && new Date(b.createdAt) >= start && new Date(b.createdAt) <= end) {
         buildingsAdded++;
@@ -195,7 +196,7 @@ exports.getGeneralReport = async (req, res) => {
         return expDate >= start && expDate <= end;
       });
       totalPeriodExpenses = periodExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
-      
+
       // ✅ Top 5 Major Expenses
       majorExpenses = periodExpenses
         .sort((a, b) => (b.amount || 0) - (a.amount || 0))
@@ -259,7 +260,7 @@ exports.getGeneralReport = async (req, res) => {
 exports.getEmployeePerformanceReport = async (req, res) => {
   try {
     const { period = 'monthly', startDate, endDate, search = '' } = req.query;
-    
+
     let start = new Date();
     let end = new Date();
 
@@ -290,7 +291,7 @@ exports.getEmployeePerformanceReport = async (req, res) => {
     // ✅ Search filter
     if (search) {
       const searchRegex = new RegExp(search, 'i');
-      employees = employees.filter(emp => 
+      employees = employees.filter(emp =>
         searchRegex.test(emp.name) ||
         searchRegex.test(emp.designation) ||
         searchRegex.test(emp.department) ||
@@ -329,7 +330,7 @@ exports.getEmployeePerformanceReport = async (req, res) => {
       const lateMinutes = attendance.reduce((sum, a) => sum + (a.lateMinutes || 0), 0);
       const lateDeduction = lateMinutes * (emp.attendanceSettings?.lateDeduction || 10);
       const taskFailureDeduction = failed * (emp.attendanceSettings?.taskFailureDeduction || 1000);
-      
+
       // ✅ Custom task failure deductions
       const failedTasksWithDeduction = tasks.filter(t => t.status === 'Failed' && t.failureDeduction);
       const customTaskDeductions = failedTasksWithDeduction.reduce((sum, t) => sum + (t.failureDeduction || 0), 0);
@@ -408,14 +409,15 @@ exports.getEmployeePerformanceReport = async (req, res) => {
 // ============================================================
 // EXPORT ALL REPORTS (Combined)
 // ============================================================
+
 exports.exportAllReports = async (req, res) => {
   try {
     const { period = 'monthly' } = req.body;
 
-    // ✅ Get all reports data
-    const profitLoss = await exports.getProfitLossReportData(period);
-    const general = await exports.getGeneralReportData(period);
-    const employee = await exports.getEmployeePerformanceReportData(period);
+    // ✅ Direct helper functions call karo (self-reference fix)
+    const profitLoss = await getProfitLossReportData(period);
+    const general = await getGeneralReportData(period);
+    const employee = await getEmployeePerformanceReportData(period);
 
     res.status(200).json({
       success: true,
@@ -436,35 +438,31 @@ exports.exportAllReports = async (req, res) => {
 };
 
 // ✅ Helper functions for export
-exports.getProfitLossReportData = async (period) => {
-  // Reuse logic from getProfitLossReport
-  // Simplified version for export
+async function getProfitLossReportData(period) {
   const revenue = await Revenue.findOne();
   return {
     totalIncome: revenue?.income?.reduce((sum, i) => sum + (i.amount || 0), 0) || 0,
     totalExpenses: revenue?.expenses?.reduce((sum, e) => sum + (e.amount || 0), 0) || 0,
     totalSecurities: revenue?.securities?.filter(s => s.status === 'Held').reduce((sum, s) => sum + (s.amount || 0), 0) || 0,
   };
-};
+}
 
-exports.getGeneralReportData = async (period) => {
-  // Simplified version for export
+async function getGeneralReportData(period) {
   const buildings = await Building.find();
   const employees = await Employee.find();
   const customers = await Customer.find();
-  
+
   return {
     buildings: buildings.length,
     employees: employees.length,
     customers: customers.length,
   };
-};
+}
 
-exports.getEmployeePerformanceReportData = async (period) => {
-  // Simplified version for export
+async function getEmployeePerformanceReportData(period) {
   const employees = await Employee.find();
   return {
     total: employees.length,
     active: employees.filter(e => e.status === 'Active').length,
   };
-};
+}

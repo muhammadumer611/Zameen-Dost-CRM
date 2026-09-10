@@ -10,6 +10,7 @@ const settingSchema = new mongoose.Schema({
     timeZone: { type: String, default: 'Asia/Karachi' },
     currency: { type: String, default: 'Rs.' },
     dateFormat: { type: String, default: 'DD/MM/YYYY' },
+    theme: { type: String, enum: ['light', 'dark', 'system'], default: 'system' },
   },
   employee: {
     defaultLeaveDeduction: { type: Number, default: 500 },

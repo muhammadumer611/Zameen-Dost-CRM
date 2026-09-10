@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState, useEffect } from "react";
+import { createContext, useContext, useMemo, useState, useEffect, useCallback } from "react";
 import { revenueAPI } from "@/lib/api";
 
 const RevenueContext = createContext(null);
@@ -15,6 +15,7 @@ export function RevenueProvider({ children }) {
     totalExpenses: 0,
     netProfit: 0,
   });
+  const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -27,7 +28,10 @@ export function RevenueProvider({ children }) {
     try {
       setLoading(true);
       const response = await revenueAPI.get();
-      setRevenueData(response.data.data);
+      setRevenueData(response.data.data || response.data);
+      
+      // ✅ Load transactions after revenue
+      await loadTransactions();
       setError(null);
     } catch (error) {
       console.error("❌ Failed to load revenue:", error);
@@ -37,11 +41,23 @@ export function RevenueProvider({ children }) {
     }
   };
 
+  // ✅ Load transactions separately
+  const loadTransactions = async () => {
+    try {
+      const response = await revenueAPI.getTransactions();
+      setTransactions(response.data.data || []);
+    } catch (error) {
+      console.error("❌ Failed to load transactions:", error);
+      setTransactions([]);
+    }
+  };
+
   // ✅ Toggle securities
   const toggleSecurities = async () => {
     try {
       const response = await revenueAPI.toggleSecurities();
-      setRevenueData(response.data.data);
+      setRevenueData(response.data.data || response.data);
+      await loadTransactions();
       return response.data.data;
     } catch (error) {
       console.error("❌ Failed to toggle securities:", error);
@@ -49,13 +65,14 @@ export function RevenueProvider({ children }) {
     }
   };
 
-  // ✅ Add income with better error handling
+  // ✅ Add income
   const addIncome = async (incomeData) => {
     try {
       console.log("💰 Adding income:", incomeData);
       const response = await revenueAPI.addIncome(incomeData);
-      setRevenueData(response.data.data);
-      console.log("✅ Income added successfully:", response.data.data);
+      setRevenueData(response.data.data || response.data);
+      await loadTransactions();
+      console.log("✅ Income added successfully");
       return response.data.data;
     } catch (error) {
       console.error("❌ Failed to add income:", error);
@@ -64,13 +81,14 @@ export function RevenueProvider({ children }) {
     }
   };
 
-  // ✅ Add expense with better error handling
+  // ✅ Add expense
   const addExpense = async (expenseData) => {
     try {
       console.log("💸 Adding expense:", expenseData);
       const response = await revenueAPI.addExpense(expenseData);
-      setRevenueData(response.data.data);
-      console.log("✅ Expense added successfully:", response.data.data);
+      setRevenueData(response.data.data || response.data);
+      await loadTransactions();
+      console.log("✅ Expense added successfully");
       return response.data.data;
     } catch (error) {
       console.error("❌ Failed to add expense:", error);
@@ -82,34 +100,56 @@ export function RevenueProvider({ children }) {
   // ✅ Add security
   const addSecurity = async (securityData) => {
     try {
-      console.log("🔒 Adding security:", securityData);
       const response = await revenueAPI.addSecurity(securityData);
-      setRevenueData(response.data.data);
+      setRevenueData(response.data.data || response.data);
+      await loadTransactions();
       return response.data.data;
     } catch (error) {
-      console.error("❌ Failed to add security:", error);
+      console.error("Failed to add security:", error);
       throw error;
     }
   };
 
-  // ✅ Get transactions
-  const getTransactions = async () => {
+  // ✅ Settle security
+  const settleSecurity = async (settlementData) => {
     try {
-      const response = await revenueAPI.getTransactions();
-      return response.data.data || [];
+      const response = await revenueAPI.settleSecurity(settlementData);
+      setRevenueData(response.data.data || response.data);
+      await loadTransactions();
+      return response.data.data;
     } catch (error) {
-      console.error("❌ Failed to get transactions:", error);
-      return [];
+      console.error("Failed to settle security:", error);
+      throw error;
     }
   };
 
+  // ✅ Get transactions (sync - returns state)
+  const getTransactions = useCallback(() => {
+    return transactions;
+  }, [transactions]);
+
   // ✅ Get revenue stats
-  const getRevenueStats = () => {
-    const totalIncome = (revenueData.income || []).reduce((sum, i) => sum + (i.amount || 0), 0);
-    const totalExpenses = (revenueData.expenses || []).reduce((sum, e) => sum + (e.amount || 0), 0);
+  const getRevenueStats = useCallback(() => {
+    const isSecurityDeposit = (item) => {
+      const type = String(item?.type || "").toLowerCase();
+      const category = String(item?.category || "").toLowerCase();
+      if (type.includes("forfeit") || category.includes("forfeit")) return false;
+      return type === "security" || category === "security";
+    };
+    const isSecurityRefund = (item) => {
+      const text = `${item?.type || ""} ${item?.category || ""}`.toLowerCase();
+      return text.includes("security refund") || text.includes("security returned");
+    };
+
+    const totalIncome = (revenueData.income || [])
+      .filter((item) => !isSecurityDeposit(item))
+      .reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+    const totalExpenses = (revenueData.expenses || [])
+      .filter((item) => !isSecurityRefund(item))
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
     const securitiesTotal = (revenueData.securities || [])
-      .filter(s => s.status === "Held")
-      .reduce((sum, s) => sum + (s.amount || 0), 0);
+      .filter((s) => s.status === "Held")
+      .reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
     const totalRevenue = revenueData.includeSecurities ? totalIncome + securitiesTotal : totalIncome;
     const netProfit = totalRevenue - totalExpenses;
 
@@ -121,33 +161,32 @@ export function RevenueProvider({ children }) {
       netProfit,
       includeSecurities: revenueData.includeSecurities || false,
     };
-  };
+  }, [revenueData]);
 
   // ✅ Reset revenue data
   const resetRevenue = async () => {
-    try {
-      await loadRevenue();
-    } catch (error) {
-      console.error("❌ Failed to reset revenue:", error);
-    }
+    await loadRevenue();
   };
 
   const value = useMemo(
     () => ({
       revenueData,
       setRevenueData,
+      transactions,
       loading,
       error,
       loadRevenue,
+      loadTransactions,
       toggleSecurities,
       addIncome,
       addExpense,
       addSecurity,
+      settleSecurity, // ✅ Added settleSecurity to context
       getTransactions,
       getRevenueStats,
       resetRevenue,
     }),
-    [revenueData, loading, error]
+    [revenueData, transactions, loading, error, getTransactions, getRevenueStats] // ✅ Added missing dependencies
   );
 
   return <RevenueContext.Provider value={value}>{children}</RevenueContext.Provider>;

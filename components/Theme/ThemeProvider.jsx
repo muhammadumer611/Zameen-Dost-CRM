@@ -18,7 +18,7 @@ export function ThemeProvider({ children }) {
     <NextThemesProvider
       attribute="class"
       defaultTheme="dark"
-      enableSystem={false}
+      enableSystem={true}
       disableTransitionOnChange
       // ✅ Script props ko customize karo
       scriptProps={{

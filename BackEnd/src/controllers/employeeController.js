@@ -267,6 +267,8 @@ exports.markAttendance = async (req, res) => {
     employee.attendance.push(attendanceRecord);
     await employee.save();
 
+
+
     res.status(200).json({
       success: true,
       message: 'Attendance marked successfully.',
@@ -408,6 +410,37 @@ exports.paySalary = async (req, res) => {
 
     employee.salaryHistory.push(salaryRecord);
     await employee.save();
+
+    try {
+  const Revenue = require('../models/Revenue');
+  let revenue = await Revenue.findOne();
+  if (!revenue) {
+    revenue = await Revenue.create({ income: [], expenses: [], securities: [] });
+  }
+  
+  revenue.expenses.push({
+    type: 'Expense',
+    transactionType: 'Expense',
+    category: 'Salary',
+    description: `Salary payment to ${employee.name}`,
+    amount: paidAmount,
+    paidTo: employee.name,
+    employeeId: employee._id,
+    employeeName: employee.name,
+    fullSalary: monthlySalary,
+    month: salaryRecord.month,
+    status: 'Paid',
+    deductions: salaryRecord.deductions,
+    salaryPayment: salaryRecord,
+    paidAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+  });
+  
+  await revenue.save();
+} catch (revenueError) {
+  console.error('Failed to add salary to revenue:', revenueError);
+  // Don't block salary payment if revenue update fails
+}
 
     res.status(200).json({
       success: true,

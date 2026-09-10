@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -6,9 +7,33 @@ import {
 
 export default function SecurityHistory({
   customer,
+  filterCurrent = false,
 }) {
-  const history =
-    customer.securityHistory || [];
+  const rentStartDate = customer?.rentStartDate || customer?.currentRental?.rentStartDate;
+  const paymentDateTime = customer?.initialPayment?.paymentDateTime;
+
+  const history = useMemo(() => {
+    const rawHistory = customer?.securityHistory || [];
+    if (!filterCurrent) return rawHistory;
+
+    return rawHistory.filter((item) => {
+      if (item.archived) return false;
+      // Active customers have held security; returned/forfeited records belong to previous rental clearances
+      if (item.type === "returned" || item.type === "forfeited") return false;
+      if (!rentStartDate && !paymentDateTime) return true;
+
+      const threshold = paymentDateTime
+        ? Math.min(
+            new Date(rentStartDate || paymentDateTime).setHours(0, 0, 0, 0),
+            new Date(paymentDateTime).getTime()
+          )
+        : new Date(rentStartDate).setHours(0, 0, 0, 0);
+
+      if (!item.date) return true;
+      const itemTime = new Date(item.date).getTime();
+      return isNaN(itemTime) || itemTime >= threshold;
+    });
+  }, [customer?.securityHistory, filterCurrent, rentStartDate, paymentDateTime]);
 
   return (
     <div className="overflow-hidden rounded-2xl border border-border bg-card">
@@ -43,6 +68,8 @@ export default function SecurityHistory({
               item.type === "received";
             const forfeited =
               item.type === "forfeited";
+            const returned =
+              item.type === "returned";
 
             return (
               <div
@@ -56,7 +83,9 @@ export default function SecurityHistory({
                         ? "bg-emerald-500/10 text-emerald-400"
                         : forfeited
                         ? "bg-red-500/10 text-red-400"
-                        : "bg-amber-500/10 text-amber-400"
+                        : returned
+                        ? "bg-amber-500/10 text-amber-400"
+                        : "bg-muted text-muted-foreground"
                     }`}
                   >
                     {received ? (
@@ -72,7 +101,9 @@ export default function SecurityHistory({
                         ? "Security Received"
                         : forfeited
                         ? "Security Forfeited"
-                        : "Security Returned"}
+                        : returned
+                        ? "Security Returned"
+                        : "Security Transaction"}
                     </p>
 
                     <p className="mt-1 text-xs text-muted-foreground">
@@ -95,7 +126,9 @@ export default function SecurityHistory({
                       ? "text-emerald-400"
                       : forfeited
                       ? "text-red-400"
-                      : "text-amber-400"
+                      : returned
+                      ? "text-amber-400"
+                      : "text-muted-foreground"
                   }`}
                 >
                   {received ? "+" : "-"} Rs.{" "}

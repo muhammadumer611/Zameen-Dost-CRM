@@ -191,7 +191,21 @@ exports.addSecurityTransaction = async (req, res) => {
       });
     }
 
+    // ✅ Push new transaction
     customer.securityHistory.push(transactionData);
+    
+    // ✅ Update currentRental security status based on transaction
+    if (transactionData.type === 'received') {
+      customer.currentRental.security = (customer.currentRental.security || 0) + Number(transactionData.amount || 0);
+      customer.currentRental.status = 'Active';
+    } else if (transactionData.type === 'returned') {
+      customer.currentRental.security = Math.max((customer.currentRental.security || 0) - Number(transactionData.amount || 0), 0);
+      customer.currentRental.status = 'Inactive';
+    } else if (transactionData.type === 'forfeited') {
+      customer.currentRental.security = Math.max((customer.currentRental.security || 0) - Number(transactionData.amount || 0), 0);
+      customer.currentRental.status = 'Inactive';
+    }
+
     await customer.save();
 
     res.status(200).json({

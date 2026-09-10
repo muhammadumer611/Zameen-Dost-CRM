@@ -36,17 +36,32 @@ export default function ProfitLossReport() {
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
 
+    const isSecurityDeposit = (item) => {
+      const type = String(item?.type || '').toLowerCase();
+      const category = String(item?.category || '').toLowerCase();
+      if (type.includes('forfeit') || category.includes('forfeit')) return false;
+      return type === 'security' || category === 'security';
+    };
+    const isSecurityRefund = (item) => {
+      const text = `${item?.type || ''} ${item?.category || ''}`.toLowerCase();
+      return text.includes('security refund') || text.includes('security returned');
+    };
+
     const filteredIncome = (revenueData.income || []).filter(
-      (i) => new Date(i.createdAt) >= start && new Date(i.createdAt) <= end
+      (i) => new Date(i.createdAt) >= start && new Date(i.createdAt) <= end && !isSecurityDeposit(i)
     );
     
     const filteredExpenses = (revenueData.expenses || []).filter(
-      (e) => new Date(e.createdAt) >= start && new Date(e.createdAt) <= end
+      (e) => new Date(e.createdAt) >= start && new Date(e.createdAt) <= end && !isSecurityRefund(e)
     );
 
     const filteredSecurities = (revenueData.securities || [])
-      .filter(s => s.status === "Held")
-      .filter(s => new Date(s.createdAt) >= start && new Date(s.createdAt) <= end);
+      .filter((s) => s.status === "Held")
+      .filter((s) => new Date(s.createdAt) >= start && new Date(s.createdAt) <= end);
+
+    const securityMovements = (revenueData.securities || []).filter(
+      (s) => new Date(s.createdAt) >= start && new Date(s.createdAt) <= end
+    );
 
     const totalIncome = filteredIncome.reduce((sum, i) => sum + i.amount, 0);
     const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
@@ -57,6 +72,7 @@ export default function ProfitLossReport() {
       filteredIncome,
       filteredExpenses,
       filteredSecurities,
+      securityMovements,
       totalIncome,
       totalExpenses,
       totalSecurities,
@@ -221,6 +237,24 @@ export default function ProfitLossReport() {
             <div className="row total">
               <span>Total Expenses</span>
               <span>Rs. {filteredData.totalExpenses.toLocaleString()}</span>
+            </div>
+          </div>
+
+          <div className="section">
+            <h2>Security Transactions</h2>
+            {filteredData.securityMovements.length === 0 ? (
+              <p style={{ color: '#94a3b8', textAlign: 'center', padding: '20px 0' }}>No security records found</p>
+            ) : (
+              filteredData.securityMovements.map((sec, i) => (
+                <div key={i} className="row">
+                  <span className="label">{sec.eventType || sec.status} - {sec.description || sec.tenantName || ''}</span>
+                  <span>Rs. {Number(sec.amount || 0).toLocaleString()}</span>
+                </div>
+              ))
+            )}
+            <div className="row total">
+              <span>Securities Currently Held</span>
+              <span>Rs. {filteredData.totalSecurities.toLocaleString()}</span>
             </div>
           </div>
 
